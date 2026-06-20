@@ -1,9 +1,7 @@
 package main
 
 import (
-	"compress/zlib"
 	"fmt"
-	"io"
 	"os"
 )
 
@@ -12,25 +10,9 @@ func catFile() {
 
 	fileName := os.Args[3]
 
-	filePath := fmt.Sprintf("%s/%s", fileName[:2], fileName[2:])
+	file := readGitObject(fileName)
 
-	file, err := os.Open(fmt.Sprintf("./.git/objects/%s", filePath))
-
-	if err != nil {
-		panic(err)
-	}
-
-	reader, err := zlib.NewReader(file)
-
-	if err != nil {
-		panic(err)
-	}
-
-	read, err := io.ReadAll(reader)
-
-	if err != nil {
-		panic(err)
-	}
+	read := decompressGitObj(file)
 
 	// The file contains a header and the contents of the blob object, compressed using Zlib.
 	//
