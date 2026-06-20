@@ -40,6 +40,9 @@ func main() {
 	case "write-tree":
 		writeTree()
 
+	case "commit-tree":
+		implCmdCommitTree()
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)

@@ -10,11 +10,11 @@ import (
 // computes the hash of the buffer
 // Writes the tree object to .git/objects/xx/xx...
 
-func commitTree(buffer *bytes.Buffer) []byte {
+func commitObject(buffer *bytes.Buffer, objName string) []byte {
 	// FIXME: This is extremely wasteful...
 	newBuffer := bytes.Buffer{}
 
-	newBuffer.Write([]byte("tree"))
+	newBuffer.WriteString(objName)
 	newBuffer.WriteByte(' ')
 	newBuffer.WriteString(fmt.Sprintf("%d", len(buffer.Bytes())))
 	newBuffer.WriteByte(0)
@@ -90,7 +90,7 @@ func writeDir(dirName string, currPath string, buffer *bytes.Buffer) {
 			writeDir(entry.Name(), filepath.Join(currPath, entry.Name()), &newBuffer)
 
 			// Now commit this as a tree object
-			treeHash := commitTree(&newBuffer)
+			treeHash := commitObject(&newBuffer, "tree")
 
 			// <mode> <name>\0<20_byte_sha (not hex)>
 			buffer.Write([]byte(mode))
@@ -126,6 +126,6 @@ func writeTree() {
 	writeDir(".", "", &buffer)
 
 	// Now we have the final buffer, write the tree object
-	finalTreeHash := commitTree(&buffer)
+	finalTreeHash := commitObject(&buffer, "tree")
 	fmt.Printf("%x\n", finalTreeHash)
 }
