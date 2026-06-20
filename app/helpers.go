@@ -56,6 +56,5 @@ func findFirstChar(slice []byte, start int, char byte) int {
 func computeSha1Hash(buf []byte) []byte {
 	hasher := sha1.New()
 	hasher.Write(buf)
-
 	return hasher.Sum(nil)
 }

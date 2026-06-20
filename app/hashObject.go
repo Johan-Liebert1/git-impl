@@ -41,17 +41,23 @@ func commitToDisk(bytes bytes.Buffer, hexHash string) {
 		panic("Could not write entire thing")
 	}
 
-	zlibWriter.Flush()
+	if err := zlibWriter.Flush(); err != nil {
+		fmt.Printf("flushing zlibWriter failed: %+v\n", err)
+		os.Exit(1)
+	}
 
 	// The final checksum is written by this
-	zlibWriter.Close()
+	if err := zlibWriter.Close(); err != nil {
+		fmt.Printf("closing zlibWriter failed: %+v\n", err)
+		os.Exit(1)
+	}
 }
 
 // Reads a file, converts it to a git blob
 // Computes it's sha1 hash
 // Saves it in .git/objects/xx/xxxx...
 // Returns the sha1 hash
-func hashFile(fileName string, writeToFile bool) []byte {
+func hashFile(fileName string, writeToFile bool, printOut bool) []byte {
 	file, err := os.ReadFile(fileName)
 
 	if err != nil {
@@ -74,13 +80,18 @@ func hashFile(fileName string, writeToFile bool) []byte {
 	hexHash := fmt.Sprintf("%x", hashBytes)
 
 	if !writeToFile {
-		fmt.Println(hexHash)
+		if printOut {
+			fmt.Println(hexHash)
+		}
+
 		return hashBytes
 	}
 
 	commitToDisk(bytes, hexHash)
 
-	fmt.Println(hexHash)
+	if printOut {
+		fmt.Println(hexHash)
+	}
 
 	return hashBytes
 }
@@ -102,5 +113,5 @@ func hashObject() {
 		fileName = os.Args[2]
 	}
 
-	hashFile(fileName, writeToFile)
+	hashFile(fileName, writeToFile, true)
 }

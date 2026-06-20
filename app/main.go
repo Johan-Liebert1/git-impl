@@ -37,6 +37,9 @@ func main() {
 	case "ls-tree":
 		lsTree()
 
+	case "write-tree":
+		writeTree()
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
