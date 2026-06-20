@@ -14,48 +14,9 @@ func badArgsPanic(argLen int) {
 	}
 }
 
-// git hash-object [-w] <file_name>
-func hashObject() {
-	badArgsPanic(3)
-
-	var (
-		writeToFile = false
-		fileName    = ""
-	)
-
-	if os.Args[2] == "-w" {
-		writeToFile = true
-		badArgsPanic(4)
-		fileName = os.Args[3]
-	} else {
-		fileName = os.Args[2]
-	}
-
-	file, err := os.ReadFile(fileName)
-
-	if err != nil {
-		panic(err)
-	}
-
-	// Header is of the form [blob,commit] <len_contents>\0
-	var bytes bytes.Buffer
-	bytes.WriteString(fmt.Sprintf("blob %d\x00", len(file)))
-	bytes.Write(file)
-
-	// Although the object file is stored with zlib compression, 
-	// the SHA-1 hash needs to be computed over the "uncompressed"
-	// contents of the file, not the compressed version.
-	sha1Hash := sha1.New()
-	sha1Hash.Write(bytes.Bytes())
-	hashBytes := sha1Hash.Sum(nil)
-
-	hexHash := fmt.Sprintf("%x", hashBytes)
-
-	if !writeToFile {
-		fmt.Println(hexHash)
-		return
-	}
-
+// Accepts buffer and the hash of the buffer
+// Writes the equivalent file to .git/objects/xx/xx...
+func commitToDisk(bytes bytes.Buffer, hexHash string) {
 	dirPath := fmt.Sprintf("./.git/objects/%s", hexHash[:2])
 
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
@@ -84,6 +45,62 @@ func hashObject() {
 
 	// The final checksum is written by this
 	zlibWriter.Close()
+}
+
+// Reads a file, converts it to a git blob
+// Computes it's sha1 hash
+// Saves it in .git/objects/xx/xxxx...
+// Returns the sha1 hash
+func hashFile(fileName string, writeToFile bool) []byte {
+	file, err := os.ReadFile(fileName)
+
+	if err != nil {
+		fmt.Printf("Failed to read file '%s': %+v\n", fileName, err)
+		os.Exit(1)
+	}
+
+	// Header is of the form [blob,commit] <len_contents>\0
+	var bytes bytes.Buffer
+	bytes.WriteString(fmt.Sprintf("blob %d\x00", len(file)))
+	bytes.Write(file)
+
+	// Although the object file is stored with zlib compression,
+	// the SHA-1 hash needs to be computed over the "uncompressed"
+	// contents of the file, not the compressed version.
+	sha1Hash := sha1.New()
+	sha1Hash.Write(bytes.Bytes())
+	hashBytes := sha1Hash.Sum(nil)
+
+	hexHash := fmt.Sprintf("%x", hashBytes)
+
+	if !writeToFile {
+		fmt.Println(hexHash)
+		return hashBytes
+	}
+
+	commitToDisk(bytes, hexHash)
 
 	fmt.Println(hexHash)
+
+	return hashBytes
+}
+
+// git hash-object [-w] <file_name>
+func hashObject() {
+	badArgsPanic(3)
+
+	var (
+		writeToFile = false
+		fileName    = ""
+	)
+
+	if os.Args[2] == "-w" {
+		writeToFile = true
+		badArgsPanic(4)
+		fileName = os.Args[3]
+	} else {
+		fileName = os.Args[2]
+	}
+
+	hashFile(fileName, writeToFile)
 }

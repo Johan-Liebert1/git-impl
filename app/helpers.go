@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/zlib"
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
@@ -50,4 +51,11 @@ func findFirstChar(slice []byte, start int, char byte) int {
 	}
 
 	return idx
+}
+
+func computeSha1Hash(buf []byte) []byte {
+	hasher := sha1.New()
+	hasher.Write(buf)
+
+	return hasher.Sum(nil)
 }
