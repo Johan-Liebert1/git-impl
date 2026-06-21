@@ -24,13 +24,15 @@ type PackHeader struct {
 	Count uint32
 }
 
+type ObjType uint8
+
 const (
-	ObjTypeCommit   = 1
-	ObjTypeTree     = 2
-	ObjTypeBlob     = 3
-	ObjTypeTag      = 4
-	ObjTypeOfsDelta = 6
-	ObjTypeRefDelta = 7
+	ObjTypeCommit   ObjType = 1
+	ObjTypeTree     ObjType = 2
+	ObjTypeBlob     ObjType = 3
+	ObjTypeTag      ObjType = 4
+	ObjTypeOfsDelta ObjType = 6
+	ObjTypeRefDelta ObjType = 7
 )
 
 // <4 hex digits><payload>
@@ -52,62 +54,22 @@ func validatePktLine(line string) (bool, int) {
 	return int(length) == len(line)+1, int(length)
 }
 
-func parsePackFile(data []byte) {
-	// Header - 0008NAK\n (skip it)
-	if string(data[:8]) != "0008NAK\n" {
-		fmt.Printf("Invalid NAK header. Got: %s\n", string(data[:8]))
-		os.Exit(1)
-	}
-
-	buffer := bytes.NewBuffer(data[8:])
-
-	packHeader := PackHeader{}
-	binary.Read(buffer, binary.BigEndian, &packHeader)
-
-	// Now expect PACK
-	if packHeader.Signature != [4]byte{'P', 'A', 'C', 'K'} {
-		fmt.Printf("Invalid PACK header. Got: %s\n", packHeader.Signature)
-		os.Exit(1)
-	}
-
-	// Now parse objects
-	// (undeltified representation)
-	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
-	// compressed data
-
-	// Object header format
-	//
-	// First byte:
-	//
-	// MSB        = continuation bit
-	// bits 4-6   = type
-	// bits 0-3   = size (low 4 bits)
-	//
-	// 7 6 5 4 3 2 1 0
-	// +-+-+-+-+-+-+-+
-	// |C| T T T |S S S S|
-	// +-+-+-+-+-+-+-+
-
-	// cttt & 0111
-
-	objectType := [1]byte{}
-	binary.Read(buffer, binary.BigEndian, &objectType)
-
-	continueSet := objectType[0]>>7 == 1
-	objType := (objectType[0] >> 4) & 0b0111
-
+func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 	switch objType {
 	case ObjTypeCommit:
 		{
-			fmt.Println("ObjTypeCommit")
+			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "commit")
+			fmt.Printf("Wrote commit object: %x\n", hash)
 		}
 	case ObjTypeTree:
 		{
-			fmt.Println("ObjTypeTree")
+			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "tree")
+			fmt.Printf("Wrote tree object: %x\n", hash)
 		}
 	case ObjTypeBlob:
 		{
-			fmt.Println("ObjTypeBlob")
+			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "blob")
+			fmt.Printf("Wrote blob object: %x\n", hash)
 		}
 	case ObjTypeTag:
 		{
@@ -128,6 +90,33 @@ func parsePackFile(data []byte) {
 			os.Exit(1)
 		}
 	}
+
+}
+
+func parseObjects(cloneDir string, buffer *bytes.Buffer) {
+	// Now parse objects
+	// (undeltified representation)
+	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
+	// compressed data
+
+	// Object header format
+	//
+	// First byte:
+	//
+	// MSB        = continuation bit (C)
+	// bits 4-6   = type (T)
+	// bits 0-3   = size (low 4 bits) (S)
+	//
+	//  7 6 5 4 3 2 1 0
+	// |C T T T S S S S|
+
+	// cttt & 0111
+
+	objectType := [1]byte{}
+	binary.Read(buffer, binary.BigEndian, &objectType)
+
+	continueSet := objectType[0]>>7 == 1
+	objType := (objectType[0] >> 4) & 0b0111
 
 	// 0000 1111 => MSB + 3 bits for type rest is size
 	size := []byte{objectType[0] & 0b00001111}
@@ -157,26 +146,70 @@ func parsePackFile(data []byte) {
 		shift += 7
 	}
 
-	fmt.Printf("totalSize: %d\n", totalSize)
+	switch ObjType(objType) {
+	case ObjTypeCommit, ObjTypeTree, ObjTypeBlob, ObjTypeTag:
+		{
+			// Now we read exactly `totalSize` amount of uncompressed bytes
+			reader, err := zlib.NewReader(buffer)
 
-	// Now we read exactly `totalSize` amount of uncompressed bytes
-	reader, err := zlib.NewReader(buffer)
+			if err != nil {
+				fmt.Printf("Failed to create zlib reader: %+v\n", err)
+				os.Exit(1)
+			}
 
-	if err != nil {
-		fmt.Printf("Failed to create zlib reader: %+v\n", err)
+			uncompressedData := make([]byte, totalSize)
+			n, err := io.ReadFull(reader, uncompressedData)
+
+			if err != nil {
+				fmt.Printf("Failed to read zlib reader: %+v\n", err)
+				os.Exit(1)
+			}
+
+			if n != totalSize {
+				fmt.Printf("n: %d, totalSize: %d\n", n, totalSize)
+				os.Exit(1)
+			}
+
+			handleObject(cloneDir, ObjType(objType), uncompressedData)
+		}
+
+	case ObjTypeOfsDelta:
+		fmt.Println("ObjTypeOfsDelta")
+
+	case ObjTypeRefDelta: {
+		fmt.Printf("ObjTypeRefDelta. totalSize: %d", totalSize)
+	}
+
+	default:
+		{
+			fmt.Printf("Unknown type: %d\n", objType)
+			os.Exit(1)
+		}
+	}
+
+}
+
+func parsePackFile(cloneDir string, data []byte) {
+	// Header - 0008NAK\n (skip it)
+	if string(data[:8]) != "0008NAK\n" {
+		fmt.Printf("Invalid NAK header. Got: %s\n", string(data[:8]))
 		os.Exit(1)
 	}
 
-	v := make([]byte, totalSize)
-	n, err := io.ReadFull(reader, v)
-	
-	if err != nil {
-		fmt.Printf("Failed to read zlib reader: %+v\n", err)
+	buffer := bytes.NewBuffer(data[8:])
+
+	packHeader := PackHeader{}
+	binary.Read(buffer, binary.BigEndian, &packHeader)
+
+	// Now expect PACK
+	if packHeader.Signature != [4]byte{'P', 'A', 'C', 'K'} {
+		fmt.Printf("Invalid PACK header. Got: %s\n", packHeader.Signature)
 		os.Exit(1)
 	}
 
-	fmt.Println("Read ", n, " bytes")
-	fmt.Println(string(v))
+	for range packHeader.Count {
+		parseObjects(cloneDir, buffer)
+	}
 }
 
 func clone() {

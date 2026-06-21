@@ -16,8 +16,8 @@ func badArgsPanic(argLen int) {
 
 // Accepts buffer and the hash of the buffer
 // Writes the equivalent file to .git/objects/xx/xx...
-func commitToDisk(bytes bytes.Buffer, hexHash string) {
-	dirPath := fmt.Sprintf("./.git/objects/%s", hexHash[:2])
+func commitToDisk(repoPath string, bytes bytes.Buffer, hexHash string) {
+	dirPath := fmt.Sprintf("%s/.git/objects/%s", repoPath, hexHash[:2])
 
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 		panic(err)
@@ -87,7 +87,7 @@ func hashFile(fileName string, writeToFile bool, printOut bool) []byte {
 		return hashBytes
 	}
 
-	commitToDisk(bytes, hexHash)
+	commitToDisk(".", bytes, hexHash)
 
 	if printOut {
 		fmt.Println(hexHash)

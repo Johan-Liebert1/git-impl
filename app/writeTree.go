@@ -10,7 +10,7 @@ import (
 // computes the hash of the buffer
 // Writes the tree object to .git/objects/xx/xx...
 
-func commitObject(buffer *bytes.Buffer, objName string) []byte {
+func commitObject(repoPath string, buffer *bytes.Buffer, objName string) []byte {
 	// FIXME: This is extremely wasteful...
 	newBuffer := bytes.Buffer{}
 
@@ -23,7 +23,7 @@ func commitObject(buffer *bytes.Buffer, objName string) []byte {
 	// compute the hash of new buffer and write it to disk
 	hash := computeSha1Hash(newBuffer.Bytes())
 
-	commitToDisk(newBuffer, fmt.Sprintf("%x", hash))
+	commitToDisk(repoPath, newBuffer, fmt.Sprintf("%x", hash))
 
 	return hash
 }
@@ -90,7 +90,7 @@ func writeDir(dirName string, currPath string, buffer *bytes.Buffer) {
 			writeDir(entry.Name(), filepath.Join(currPath, entry.Name()), &newBuffer)
 
 			// Now commit this as a tree object
-			treeHash := commitObject(&newBuffer, "tree")
+			treeHash := commitObject(".", &newBuffer, "tree")
 
 			// <mode> <name>\0<20_byte_sha (not hex)>
 			buffer.Write([]byte(mode))
@@ -126,6 +126,6 @@ func writeTree() {
 	writeDir(".", "", &buffer)
 
 	// Now we have the final buffer, write the tree object
-	finalTreeHash := commitObject(&buffer, "tree")
+	finalTreeHash := commitObject(".", &buffer, "tree")
 	fmt.Printf("%x\n", finalTreeHash)
 }

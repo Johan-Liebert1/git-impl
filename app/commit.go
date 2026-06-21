@@ -56,7 +56,7 @@ func implCmdCommitTree() {
 	// new line after the commit message
 	buffer.WriteByte('\n')
 
-	hash := commitObject(&buffer, "commit")
+	hash := commitObject(".", &buffer, "commit")
 
 	fmt.Printf("%x\n", hash)
 }

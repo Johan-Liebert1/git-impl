@@ -44,8 +44,11 @@ func main() {
 	case "commit-tree":
 		implCmdCommitTree()
 
-	case "clone":
-		clone()
+	case "clone": {
+		b, _ := os.ReadFile("resp")
+		parsePackFile("/home/pragyan/git-clone", b)
+	}
+		// clone()
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
