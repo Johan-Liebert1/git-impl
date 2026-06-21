@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"compress/zlib"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+)
+
+type PackHeader struct {
+	// PACK
+	Signature [4]byte
+	Version   uint32
+	// Count of objects
+	//
+	// Could be commits + trees + blobs
+	Count uint32
+}
+
+const (
+	ObjTypeCommit   = 1
+	ObjTypeTree     = 2
+	ObjTypeBlob     = 3
+	ObjTypeTag      = 4
+	ObjTypeOfsDelta = 6
+	ObjTypeRefDelta = 7
 )
 
 // <4 hex digits><payload>
@@ -29,6 +50,133 @@ func validatePktLine(line string) (bool, int) {
 	// +1 for the new line since we split that
 	// a proper parser would be better but ehhhh...
 	return int(length) == len(line)+1, int(length)
+}
+
+func parsePackFile(data []byte) {
+	// Header - 0008NAK\n (skip it)
+	if string(data[:8]) != "0008NAK\n" {
+		fmt.Printf("Invalid NAK header. Got: %s\n", string(data[:8]))
+		os.Exit(1)
+	}
+
+	buffer := bytes.NewBuffer(data[8:])
+
+	packHeader := PackHeader{}
+	binary.Read(buffer, binary.BigEndian, &packHeader)
+
+	// Now expect PACK
+	if packHeader.Signature != [4]byte{'P', 'A', 'C', 'K'} {
+		fmt.Printf("Invalid PACK header. Got: %s\n", packHeader.Signature)
+		os.Exit(1)
+	}
+
+	// Now parse objects
+	// (undeltified representation)
+	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
+	// compressed data
+
+	// Object header format
+	//
+	// First byte:
+	//
+	// MSB        = continuation bit
+	// bits 4-6   = type
+	// bits 0-3   = size (low 4 bits)
+	//
+	// 7 6 5 4 3 2 1 0
+	// +-+-+-+-+-+-+-+
+	// |C| T T T |S S S S|
+	// +-+-+-+-+-+-+-+
+
+	// cttt & 0111
+
+	objectType := [1]byte{}
+	binary.Read(buffer, binary.BigEndian, &objectType)
+
+	continueSet := objectType[0]>>7 == 1
+	objType := (objectType[0] >> 4) & 0b0111
+
+	switch objType {
+	case ObjTypeCommit:
+		{
+			fmt.Println("ObjTypeCommit")
+		}
+	case ObjTypeTree:
+		{
+			fmt.Println("ObjTypeTree")
+		}
+	case ObjTypeBlob:
+		{
+			fmt.Println("ObjTypeBlob")
+		}
+	case ObjTypeTag:
+		{
+			fmt.Println("ObjTypeTag")
+		}
+	case ObjTypeOfsDelta:
+		{
+			fmt.Println("ObjTypeOfsDelta")
+		}
+	case ObjTypeRefDelta:
+		{
+			fmt.Println("ObjTypeRefDelta")
+		}
+
+	default:
+		{
+			fmt.Printf("Unknown type: %d\n", objType)
+			os.Exit(1)
+		}
+	}
+
+	// 0000 1111 => MSB + 3 bits for type rest is size
+	size := []byte{objectType[0] & 0b00001111}
+
+	for continueSet {
+		// Keep going through the bytes and keep getting the
+		// 7 LSB to be able to finally concat and get size
+		binary.Read(buffer, binary.BigEndian, &objectType)
+
+		continueSet = (objectType[0] >> 7) == 1
+		size = append(size, objectType[0]&0b01111111)
+	}
+
+	// Size Encoding
+	//
+	// From each byte, the seven least significant bits are used to form the resulting integer.
+	// As long as the most significant bit is 1, this process continues; the byte with MSB 0 provides the last seven bits.
+	// The seven-bit chunks are concatenated. Later values are more significant.
+
+	totalSize := int(size[0])
+
+	shift := uint(4)
+
+	for i := 1; i < len(size); i++ {
+		b := size[i]
+		totalSize |= int(b) << shift
+		shift += 7
+	}
+
+	fmt.Printf("totalSize: %d\n", totalSize)
+
+	// Now we read exactly `totalSize` amount of uncompressed bytes
+	reader, err := zlib.NewReader(buffer)
+
+	if err != nil {
+		fmt.Printf("Failed to create zlib reader: %+v\n", err)
+		os.Exit(1)
+	}
+
+	v := make([]byte, totalSize)
+	n, err := io.ReadFull(reader, v)
+	
+	if err != nil {
+		fmt.Printf("Failed to read zlib reader: %+v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Read ", n, " bytes")
+	fmt.Println(string(v))
 }
 
 func clone() {
@@ -133,7 +281,7 @@ func clone() {
 	}
 
 	if len(headSha) == 0 {
-		fmt.Println("Could not find HEAD");
+		fmt.Println("Could not find HEAD")
 		os.Exit(1)
 	}
 
@@ -141,12 +289,16 @@ func clone() {
 
 	want := fmt.Sprintf("want %s\n", headSha)
 	// the PKT-Line length
-	postBody.WriteString(fmt.Sprintf("%04x", len(want) + 4))
+	postBody.WriteString(fmt.Sprintf("%04x", len(want)+4))
 	postBody.WriteString(want)
 	postBody.WriteString("0000")
 	postBody.WriteString("0009done\n")
 
-	postReq, err := http.Post(fmt.Sprintf("%s/git-upload-pack", url), "application/x-git-upload-pack-request", &postBody)
+	postReq, err := http.Post(
+		fmt.Sprintf("%s/git-upload-pack", url),
+		"application/x-git-upload-pack-request",
+		&postBody,
+	)
 
 	if err != nil {
 		fmt.Printf("Failed to send git-upload-pack request\n")
