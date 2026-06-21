@@ -247,6 +247,10 @@ func parsePackFile(cloneDir string, data []byte) {
 	}
 
 	for i := range packHeader.Count {
+		if i == 25 {
+			fmt.Println("#25 remaining len: ", len(buffer.Bytes()))
+		}
+
 		parseObjects(cloneDir, buffer, i)
 	}
 }
@@ -384,6 +388,5 @@ func clone() {
 		os.Exit(1)
 	}
 
-	f, _ := os.Create("resp")
-	f.Write(postResp)
+	parsePackFile(cloneDir, postResp)
 }
