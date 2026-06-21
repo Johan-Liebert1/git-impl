@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 )
 
-func lsTree() {
+func lsTreeCmd() {
 	nameOnly := os.Args[2] == "--name-only"
 
 	treeSha := ""
@@ -17,6 +18,10 @@ func lsTree() {
 		treeSha = os.Args[2]
 	}
 
+	lsTree(os.Stdout, treeSha, nameOnly)
+}
+
+func lsTree(writer io.Writer, treeSha string, nameOnly bool) {
 	file := readGitObject(treeSha)
 	decompressed := decompressGitObj(file)
 
@@ -82,9 +87,9 @@ func lsTree() {
 		currIdx = end - 1
 
 		if !nameOnly {
-			fmt.Printf("%d %s %s\n", mode, sha, name)
+			fmt.Fprintf(writer, "%d %s %s\n", mode, sha, name)
 		} else {
-			fmt.Printf("%s\n", name)
+			fmt.Fprintf(writer, "%s\n", name)
 		}
 	}
 }

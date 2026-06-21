@@ -70,11 +70,7 @@ func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 	case ObjTypeBlob:
 		{
 			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "blob")
-			fmt.Printf("Wrote blob object (size = %d): %x\n", len(uncompressedData), hash)
-
-			if len(uncompressedData) <= 10 {
-				fmt.Printf("Blob object: '%x'\n", uncompressedData)
-			}
+			fmt.Printf("Wrote blob object: %x\n", hash)
 		}
 	case ObjTypeTag:
 		{
@@ -389,4 +385,9 @@ func clone() {
 	}
 
 	parsePackFile(cloneDir, postResp)
+
+	// From the very first commit, get the tree then we create the directory
+	// structure from the tree
+
+	// Read the tree object from headsha
 }

@@ -36,7 +36,7 @@ func main() {
 		hashObject()
 
 	case "ls-tree":
-		lsTree()
+		lsTreeCmd()
 
 	case "write-tree":
 		writeTree()
@@ -51,6 +51,11 @@ func main() {
 
 	case "clone": {
 		clone()
+	}
+
+	case "tree-to-fs": {
+		// tree-to-fs <tree_sha> dir_name
+		treeToFs(os.Args[3], os.Args[2])
 	}
 
 	default:
