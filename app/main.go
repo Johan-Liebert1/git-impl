@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: mygit <command> [<args>...]\n")
@@ -42,6 +43,9 @@ func main() {
 
 	case "commit-tree":
 		implCmdCommitTree()
+
+	case "clone":
+		clone()
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
