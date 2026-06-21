@@ -54,6 +54,7 @@ func validatePktLine(line string) (bool, int) {
 	return int(length) == len(line)+1, int(length)
 }
 
+// Just writes down the uncompressed object commit,blob etc to disk
 func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 	switch objType {
 	case ObjTypeCommit:
@@ -69,7 +70,11 @@ func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 	case ObjTypeBlob:
 		{
 			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "blob")
-			fmt.Printf("Wrote blob object: %x\n", hash)
+			fmt.Printf("Wrote blob object (size = %d): %x\n", len(uncompressedData), hash)
+
+			if len(uncompressedData) <= 10 {
+				fmt.Printf("Blob object: '%x'\n", uncompressedData)
+			}
 		}
 	case ObjTypeTag:
 		{
@@ -93,7 +98,7 @@ func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 
 }
 
-func parseObjects(cloneDir string, buffer *bytes.Buffer) {
+func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
 	// Now parse objects
 	// (undeltified representation)
 	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
@@ -170,19 +175,53 @@ func parseObjects(cloneDir string, buffer *bytes.Buffer) {
 				os.Exit(1)
 			}
 
+			// If size is 0 then discard the empty zlib stream
+			// zlib compressed empty data = 789c 0300 0000 0001
+			// but since size is 0, we en up only reading the zlib header
+			// i.e. 789c which bites us in the ass afterwards as we try to 
+			// parse 0300... as a PACK header
+			io.Copy(io.Discard, reader)
+
+			if err := reader.Close(); err != nil {
+				fmt.Printf("Failed to close zlib reader")
+				os.Exit(1)
+			}
+
 			handleObject(cloneDir, ObjType(objType), uncompressedData)
 		}
 
 	case ObjTypeOfsDelta:
 		fmt.Println("ObjTypeOfsDelta")
 
-	case ObjTypeRefDelta: {
-		fmt.Printf("ObjTypeRefDelta. totalSize: %d", totalSize)
-	}
+	case ObjTypeRefDelta:
+		{
+			fmt.Printf("ObjTypeRefDelta. totalSize: %d\n", totalSize)
+
+			// Read the base sha
+			baseSha := make([]byte, 20)
+			io.ReadFull(buffer, baseSha)
+			fmt.Printf("baseSha: %x\n", baseSha)
+
+			zr, err := zlib.NewReader(buffer)
+			if err != nil {
+				panic(err)
+			}
+
+			uncompressedData := make([]byte, totalSize)
+			_, err = io.ReadFull(zr, uncompressedData)
+			if err != nil {
+				panic(err)
+			}
+
+			zr.Close()
+
+			fmt.Printf("%x\n", uncompressedData)
+			fmt.Println("---------------------------")
+		}
 
 	default:
 		{
-			fmt.Printf("Unknown type: %d\n", objType)
+			fmt.Printf("parseObjects: Unknown type: %d parsing object number: %d\n", objType, objNum)
 			os.Exit(1)
 		}
 	}
@@ -207,8 +246,8 @@ func parsePackFile(cloneDir string, data []byte) {
 		os.Exit(1)
 	}
 
-	for range packHeader.Count {
-		parseObjects(cloneDir, buffer)
+	for i := range packHeader.Count {
+		parseObjects(cloneDir, buffer, i)
 	}
 }
 
