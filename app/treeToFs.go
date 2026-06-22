@@ -52,7 +52,15 @@ func createFsTree(repoDir string, dirfd int, treeSha string) {
 		obj := readGitObject(repoDir, sha)
 		decompressedFile := decompressGitObj(obj)
 
-		fd, err := unix.Openat(dirfd, name, unix.O_CREAT|unix.O_RDWR, 0)
+		perms := 0
+
+		if mode == "100644" {
+			perms = 0o644
+		} else {
+			perms = 0o755
+		}
+
+		fd, err := unix.Openat(dirfd, name, unix.O_CREAT|unix.O_RDWR, uint32(perms))
 
 		if err != nil {
 			fmt.Printf("Failed to create file: %s. Err: %+v\n", name, err)
