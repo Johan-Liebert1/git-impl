@@ -52,6 +52,16 @@ func createFsTree(repoDir string, dirfd int, treeSha string) {
 		obj := readGitObject(repoDir, sha)
 		decompressedFile := decompressGitObj(obj)
 
+		// skip the header
+		nullIdx := findFirstNull(decompressedFile, 0)
+
+		if nullIdx == -1 {
+			fmt.Printf("Bad git object. Could not find null byte to get size")
+			os.Exit(1)
+		}
+
+		decompressedFile = decompressedFile[nullIdx+1:]
+
 		perms := 0
 
 		if mode == "100644" {
