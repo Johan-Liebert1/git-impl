@@ -9,9 +9,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func createFsTree(dirfd int, treeSha string) {
+func createFsTree(repoDir string, dirfd int, treeSha string) {
 	var bytes bytes.Buffer
-	lsTree(&bytes, treeSha, false)
+	lsTree(&bytes, repoDir, treeSha, false)
 
 	for line := range strings.SplitSeq(bytes.String(), "\n") {
 		if len(strings.TrimSpace(line)) == 0 {
@@ -32,24 +32,24 @@ func createFsTree(dirfd int, treeSha string) {
 			err := unix.Mkdirat(dirfd, name, 0o755)
 
 			if err != nil {
-				fmt.Printf("Failed to create dirctory '%s'\n", name)
+				fmt.Printf("Failed to create dirctory '%s': %+v\n", name, err)
 				os.Exit(1)
 			}
 
 			dirfd, err := unix.Openat(dirfd, name, unix.O_DIRECTORY, 0)
 
 			if err != nil {
-				fmt.Printf("Failed to open dirctory '%s'\n", name)
+				fmt.Printf("Failed to open dirctory '%s': %+v\n", name, err)
 				os.Exit(1)
 			}
 
-			createFsTree(dirfd, sha)
+			createFsTree(repoDir, dirfd, sha)
 
 			continue
 		}
 
 		// Create the file
-		obj := readGitObject(sha)
+		obj := readGitObject(repoDir, sha)
 		decompressedFile := decompressGitObj(obj)
 
 		fd, err := unix.Openat(dirfd, name, unix.O_CREAT|unix.O_RDWR, 0)
@@ -74,18 +74,18 @@ func createFsTree(dirfd int, treeSha string) {
 
 // Accepts a tree object sha then creates a filesystem
 // after parsing it
-func treeToFs(workingDir string, treeSha string) {
-	if err := os.MkdirAll(workingDir, 0o755); err != nil {
-		fmt.Printf("Failed to create dir '%s': %+v\n", workingDir, err)
+func treeToFs(repoDir string, treeSha string) {
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		fmt.Printf("Failed to create dir '%s': %+v\n", repoDir, err)
 		os.Exit(1)
 	}
 
-	dirfd, err := unix.Open(workingDir, unix.O_DIRECTORY, 0)
+	dirfd, err := unix.Open(repoDir, unix.O_DIRECTORY, 0)
 
 	if err != nil {
-		fmt.Printf("Failed to open dir '%s': %+v\n", workingDir, err)
+		fmt.Printf("Failed to open dir '%s': %+v\n", repoDir, err)
 		os.Exit(1)
 	}
 
-	createFsTree(dirfd, treeSha)
+	createFsTree(repoDir, dirfd, treeSha)
 }

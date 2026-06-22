@@ -18,11 +18,11 @@ func lsTreeCmd() {
 		treeSha = os.Args[2]
 	}
 
-	lsTree(os.Stdout, treeSha, nameOnly)
+	lsTree(os.Stdout, ".", treeSha, nameOnly)
 }
 
-func lsTree(writer io.Writer, treeSha string, nameOnly bool) {
-	file := readGitObject(treeSha)
+func lsTree(writer io.Writer, gitRepoPath string, treeSha string, nameOnly bool) {
+	file := readGitObject(gitRepoPath, treeSha)
 	decompressed := decompressGitObj(file)
 
 	// The format of a tree object file looks like this (after Zlib decompression)

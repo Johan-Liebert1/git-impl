@@ -10,7 +10,7 @@ func catFile() {
 
 	fileName := os.Args[3]
 
-	file := readGitObject(fileName)
+	file := readGitObject(".", fileName)
 
 	read := decompressGitObj(file)
 

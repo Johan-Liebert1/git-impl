@@ -9,12 +9,12 @@ import (
 
 // computes the hash of the buffer
 // Writes the tree object to .git/objects/xx/xx...
-
-func commitObject(repoPath string, buffer *bytes.Buffer, objName string) []byte {
+// objType = blob,commit,tree
+func commitObject(repoPath string, buffer *bytes.Buffer, objType string) []byte {
 	// FIXME: This is extremely wasteful...
 	newBuffer := bytes.Buffer{}
 
-	newBuffer.WriteString(objName)
+	newBuffer.WriteString(objType)
 	newBuffer.WriteByte(' ')
 	newBuffer.WriteString(fmt.Sprintf("%d", len(buffer.Bytes())))
 	newBuffer.WriteByte(0)
