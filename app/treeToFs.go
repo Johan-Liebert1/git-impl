@@ -95,5 +95,28 @@ func treeToFs(repoDir string, treeSha string) {
 		os.Exit(1)
 	}
 
+	// Min things .git needs to be considered a repo
+
+	// .git/
+	// ├── HEAD = ref: refs/heads/master
+	// ├── objects
+	// └── refs
+
+	if err := unix.Mkdirat(dirfd, ".git/refs", 0o755); err != nil {
+		fmt.Printf("Failed to create refs dir: %+v\n", err)
+		os.Exit(1)
+	}
+
+	headFd, err := unix.Openat(dirfd, ".git/HEAD", unix.O_CREAT|unix.O_RDWR, 0o644)
+	if err != nil {
+		fmt.Printf("Failed to create HEAD: %+v\n", err)
+		os.Exit(1)
+	}
+
+	if _, err := unix.Write(headFd, []byte("ref: refs/heads/master\n")); err != nil {
+		fmt.Printf("Failed to write to HEAD: %+v\n", err)
+		os.Exit(1)
+	}
+
 	createFsTree(repoDir, dirfd, treeSha)
 }
