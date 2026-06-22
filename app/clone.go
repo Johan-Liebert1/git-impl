@@ -59,18 +59,18 @@ func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 	switch objType {
 	case ObjTypeCommit:
 		{
-			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "commit")
-			fmt.Printf("Wrote commit object: %x\n", hash)
+			commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "commit")
+			// fmt.Printf("Wrote commit object: %x\n", hash)
 		}
 	case ObjTypeTree:
 		{
-			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "tree")
-			fmt.Printf("Wrote tree object: %x\n", hash)
+			commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "tree")
+			// fmt.Printf("Wrote tree object: %x\n", hash)
 		}
 	case ObjTypeBlob:
 		{
-			hash := commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "blob")
-			fmt.Printf("Wrote blob object: %x\n", hash)
+			commitObject(cloneDir, bytes.NewBuffer(uncompressedData), "blob")
+			// fmt.Printf("Wrote blob object: %x\n", hash)
 		}
 	case ObjTypeTag:
 		{
@@ -94,12 +94,7 @@ func handleObject(cloneDir string, objType ObjType, uncompressedData []byte) {
 
 }
 
-func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
-	// Now parse objects
-	// (undeltified representation)
-	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
-	// compressed data
-
+func parseSizeAndObjType(buffer *bytes.Buffer) (int, ObjType) {
 	// Object header format
 	//
 	// First byte:
@@ -147,7 +142,224 @@ func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
 		shift += 7
 	}
 
-	switch ObjType(objType) {
+	return totalSize, ObjType(objType)
+}
+
+// delta objects have no obj type bit
+func parseDeltaSize(buffer *bytes.Buffer) int {
+	size := 0
+	shift := uint(0)
+
+	for {
+		b, _ := buffer.ReadByte()
+		size |= int(b&0x7F) << shift
+		if b&0x80 == 0 {
+			break
+		}
+		shift += 7
+	}
+
+	return size
+}
+
+type RefDelta struct {
+	// The base sha
+	baseShaHex string
+	// The size we get from parsing object header
+	totalSize int
+	// Rest of the zlib uncompressed refdelta data
+	data []byte
+}
+
+// Spec: https://git-scm.com/docs/pack-format#_deltified_representation
+func parseRefDelta(cloneDir string, delta RefDelta) bool {
+	if !gitObjectExists(cloneDir, delta.baseShaHex) {
+		return false
+	}
+
+	buffer := bytes.NewBuffer(delta.data)
+
+	// The delta data starts with the size of the base object and the size of the object to be reconstructed.
+	// These sizes are encoded using the size encoding from above.
+
+	// We don't care about the type here are they're bogus-amogus
+	totalSizeBaseObj := parseDeltaSize(buffer)
+	totalSizeReconObj := parseDeltaSize(buffer)
+
+	// The remainder of the delta data is a sequence of instructions to reconstruct the object from the base object
+	// There are two supported instructions so far:
+	//
+	// one for copy a byte range from the source object and
+	// one for inserting new data embedded in the instruction itself.
+
+	// Each instruction has variable length.
+	// Instruction type is determined by the seventh bit (counting from 0, so basically the very first bit)
+	// of the first octet
+
+	// Instruction to copy from base object
+
+	// below
+	// s = bit for size
+	// o = bit for offset
+	// counted from right to left
+
+	// +----------+---------+---------+---------+---------+-------+-------+-------+
+	// | 1 sss oooo | offset1 | offset2 | offset3 | offset4 | size1 | size2 | size3 |
+	// +----------+---------+---------+---------+---------+-------+-------+-------+
+
+	// This is the instruction format to copy a byte range from the source object.
+	// It encodes the offset to copy from and the number of bytes to copy.
+	// Offset and size are in little-endian order.
+
+	// The first seven bits in the first octet determines which of the next seven octets is present.
+	// If bit zero is set, offset1 is present. If bit one is set offset2 is present and so on.
+
+	// this only encodes ONE offset into base and the size to copy and NOT multiple offsets
+
+	// Now to copy the data and create a new object
+	baseObjFile := readGitObject(cloneDir, delta.baseShaHex)
+	baseObjFileDecom := decompressGitObj(baseObjFile)
+
+	if gitObjectSize(baseObjFileDecom) != totalSizeBaseObj {
+		fmt.Printf(
+			"base obj data has size %d, expected %d\n",
+			gitObjectSize(baseObjFileDecom),
+			totalSizeBaseObj,
+		)
+		os.Exit(1)
+	}
+
+	// The base sha might be blob,tree,commit
+	// Get this first as we modify baseObjFileDecom this afterwards
+	baseObjectType := gitObjType(baseObjFileDecom)
+
+	// Extract only the data part of the base file
+	// Skip <commit|tree|blob> <size>\0
+	nullIdx := findFirstNull(baseObjFileDecom, 0)
+
+	if nullIdx == -1 {
+		fmt.Printf("Bad git object. Could not find null byte")
+		os.Exit(1)
+	}
+
+	baseObjFileDecom = baseObjFileDecom[nullIdx+1:]
+
+	reconstructed := []byte{}
+
+	for buffer.Len() > 0 {
+		firstByte, _ := buffer.ReadByte()
+
+		instruction := (firstByte >> 7)
+
+		switch instruction {
+		// Copy from base object case
+		case 1:
+			{
+				offsetIntoBase := 0
+				sizeToCopy := 0
+
+				// check which offsets are present
+				if firstByte&0b1 != 0 {
+					// Read the next byte
+					b, _ := buffer.ReadByte()
+					offsetIntoBase |= int(b)
+				}
+
+				if firstByte&0b10 != 0 {
+					// Read the next byte
+					b, _ := buffer.ReadByte()
+					offsetIntoBase |= int(b) << 8
+				}
+
+				if firstByte&0b100 != 0 {
+					// Read the next byte
+					b, _ := buffer.ReadByte()
+					offsetIntoBase |= int(b) << 16
+				}
+
+				if firstByte&0b1000 != 0 {
+					// Read the next byte
+					b, _ := buffer.ReadByte()
+					offsetIntoBase |= int(b) << 24
+				}
+
+				// Now we get the size
+				if firstByte&0b10000 != 0 {
+					b, _ := buffer.ReadByte()
+					sizeToCopy |= int(b)
+				}
+				if firstByte&0b100000 != 0 {
+					b, _ := buffer.ReadByte()
+					sizeToCopy |= int(b) << 8
+				}
+				if firstByte&0b1000000 != 0 {
+					b, _ := buffer.ReadByte()
+					sizeToCopy |= int(b) << 16
+				}
+
+				if sizeToCopy == 0 {
+					// There is another exception: size zero is automatically converted to 0x10000.
+					sizeToCopy = 0x10000
+				}
+
+				reconstructed = append(
+					reconstructed,
+					baseObjFileDecom[offsetIntoBase:offsetIntoBase+sizeToCopy]...)
+			}
+
+		// Add new data instruction
+		case 0:
+			{
+				// Insert instruction: the remaining 7 bits contain the size of data to insert
+				insertSize := int(firstByte & 0b01111111)
+				if insertSize == 0 {
+					fmt.Printf("Size for append instruction must be non-zero")
+					os.Exit(1)
+				}
+
+				// Read the data to insert
+				insertData := make([]byte, insertSize)
+				buffer.Read(insertData)
+				reconstructed = append(reconstructed, insertData...)
+			}
+		}
+
+		// Stop if we've reached the expected size
+		if len(reconstructed) >= totalSizeReconObj {
+			break
+		}
+	}
+
+	if len(reconstructed) != totalSizeReconObj {
+		fmt.Printf(
+			"Reconstructed data has size %d, expected %d\n",
+			len(reconstructed),
+			totalSizeReconObj,
+		)
+		os.Exit(1)
+	}
+
+	buf := bytes.NewBuffer(reconstructed)
+	// The base sha might be blob,tree,commit
+	fmt.Printf("baseObjectType: %s\n", baseObjectType)
+	commitObject(cloneDir, buf, baseObjectType)
+
+	fmt.Println("---------------------------")
+
+	return true
+}
+
+func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) []RefDelta {
+	unprocessableRefDeltas := []RefDelta{}
+
+	// Now parse objects
+	// (undeltified representation)
+	// n-byte type and length (3-bit type, (n-1)*7+4-bit length)
+	// compressed data
+
+	totalSize, objType := parseSizeAndObjType(buffer)
+
+	switch objType {
 	case ObjTypeCommit, ObjTypeTree, ObjTypeBlob, ObjTypeTag:
 		{
 			// Now we read exactly `totalSize` amount of uncompressed bytes
@@ -174,7 +386,7 @@ func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
 			// If size is 0 then discard the empty zlib stream
 			// zlib compressed empty data = 789c 0300 0000 0001
 			// but since size is 0, we en up only reading the zlib header
-			// i.e. 789c which bites us in the ass afterwards as we try to 
+			// i.e. 789c which bites us in the ass afterwards as we try to
 			// parse 0300... as a PACK header
 			io.Copy(io.Discard, reader)
 
@@ -191,13 +403,16 @@ func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
 
 	case ObjTypeRefDelta:
 		{
-			fmt.Printf("ObjTypeRefDelta. totalSize: %d\n", totalSize)
-
 			// Read the base sha
+			//
+			// This is the base object
+			// The deltas on this base object are stored in the zlib compressed
+			// data
 			baseSha := make([]byte, 20)
 			io.ReadFull(buffer, baseSha)
-			fmt.Printf("baseSha: %x\n", baseSha)
+			baseShaHex := fmt.Sprintf("%x", baseSha)
 
+			// Even if baseShaHex doesn't exist we still need to parse the zlib compressed data
 			zr, err := zlib.NewReader(buffer)
 			if err != nil {
 				panic(err)
@@ -211,17 +426,32 @@ func parseObjects(cloneDir string, buffer *bytes.Buffer, objNum uint32) {
 
 			zr.Close()
 
-			fmt.Printf("%x\n", uncompressedData)
-			fmt.Println("---------------------------")
+			refDelta := RefDelta{
+				baseShaHex: baseShaHex,
+				totalSize:  totalSize,
+				data:       uncompressedData,
+			}
+
+			if !parseRefDelta(cloneDir, refDelta) {
+				// weren't able to parse it, base sha does not exist yet
+				unprocessableRefDeltas = append(unprocessableRefDeltas, refDelta)
+			} else {
+				fmt.Printf("Parsed ref delta for base: %s\n", baseShaHex)
+			}
 		}
 
 	default:
 		{
-			fmt.Printf("parseObjects: Unknown type: %d parsing object number: %d\n", objType, objNum)
+			fmt.Printf(
+				"parseObjects: Unknown type: %d parsing object number: %d\n",
+				objType,
+				objNum,
+			)
 			os.Exit(1)
 		}
 	}
 
+	return unprocessableRefDeltas
 }
 
 func parsePackFile(cloneDir string, data []byte) {
@@ -242,12 +472,40 @@ func parsePackFile(cloneDir string, data []byte) {
 		os.Exit(1)
 	}
 
+	unprocessableRefDeltas := []RefDelta{}
+
 	for i := range packHeader.Count {
-		if i == 25 {
-			fmt.Println("#25 remaining len: ", len(buffer.Bytes()))
+		ret := parseObjects(cloneDir, buffer, i)
+		unprocessableRefDeltas = append(unprocessableRefDeltas, ret...)
+	}
+
+	fmt.Printf(
+		"Parsed most objects. RefDeltas that need processing: %d\n",
+		len(unprocessableRefDeltas),
+	)
+
+	// process the unprocessableRefDeltas
+	for len(unprocessableRefDeltas) > 0 {
+		needsProcessing := []RefDelta{}
+
+		for _, delta := range unprocessableRefDeltas {
+			if !parseRefDelta(cloneDir, delta) {
+				needsProcessing = append(needsProcessing, delta)
+			}
 		}
 
-		parseObjects(cloneDir, buffer, i)
+		fmt.Printf("Parsed %d RefDeltas\n", len(unprocessableRefDeltas)-len(needsProcessing))
+
+		if len(needsProcessing) == len(unprocessableRefDeltas) {
+			fmt.Printf(
+				"Could not parse a single refDelta after one iteration: Before: (%d items), After: (%d items)\n",
+				len(unprocessableRefDeltas),
+				len(needsProcessing),
+			)
+			os.Exit(1)
+		}
+
+		unprocessableRefDeltas = needsProcessing
 	}
 }
 
@@ -318,7 +576,7 @@ func clone() {
 	bodyString := string(body)
 	headSha := ""
 
-	for _, line := range strings.Split(bodyString, "\n") {
+	for line := range strings.SplitSeq(bodyString, "\n") {
 		if line[:4] == "0000" {
 			// flush packet signalling separation between logical sections
 			// ignore
@@ -390,4 +648,21 @@ func clone() {
 	// structure from the tree
 
 	// Read the tree object from headsha
+	file := readGitObject(cloneDir, headSha)
+	decompressed := decompressGitObj(file)
+
+	// first line in commit is commit <size>\0tree <>...
+	nullIdx := findFirstNull(decompressed, 0)
+
+	if nullIdx == -1 {
+		fmt.Printf("Malformed commit: %s\n", headSha)
+		os.Exit(1)
+	}
+
+	decompressedStr := string(decompressed[nullIdx:])
+
+	tree := strings.Split(decompressedStr, "\n")[0]
+	treeSha := strings.TrimSpace(tree[5:])
+
+	treeToFs(cloneDir, treeSha)
 }
